@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ReconcileResult {
     Ok(Action),
     Err(crate::ReconcileError),
