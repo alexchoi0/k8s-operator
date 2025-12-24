@@ -1,6 +1,6 @@
 [package]
 name = "k8s-operator-controller"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Kubernetes controller runtime for k8s-operator framework"
 license = "MIT OR Apache-2.0"
@@ -9,7 +9,7 @@ keywords = ["kubernetes", "operator", "controller", "reconciler"]
 categories = ["development-tools"]
 
 [dependencies]
-k8s-operator-core = { path = "../k8s-operator-core", version = "0.1.0" }
+k8s-operator-core = { path = "../k8s-operator-core", version = "0.1.1" }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
