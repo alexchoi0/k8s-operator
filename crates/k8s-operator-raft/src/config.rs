@@ -66,20 +66,6 @@ impl RaftConfig {
 
         Ok(config)
     }
-
-    pub fn to_openraft_config(&self) -> openraft::Config {
-        openraft::Config {
-            cluster_name: self.cluster_name.clone(),
-            election_timeout_min: self.election_timeout.as_millis() as u64,
-            election_timeout_max: (self.election_timeout.as_millis() as u64) * 2,
-            heartbeat_interval: self.heartbeat_interval.as_millis() as u64,
-            install_snapshot_timeout: self.install_snapshot_timeout.as_millis() as u64,
-            send_snapshot_timeout: self.send_timeout.as_millis() as u64,
-            snapshot_policy: openraft::SnapshotPolicy::LogsSinceLast(self.snapshot_threshold as u32),
-            max_payload_entries: self.max_payload_entries as usize,
-            ..Default::default()
-        }
-    }
 }
 
 #[derive(Default)]

@@ -21,13 +21,7 @@ where
         OperatorError::Internal("Resource has no name".to_string())
     })?;
 
-    let namespace = resource.meta().namespace.clone();
-
-    let api: Api<K> = if let Some(ns) = namespace {
-        Api::namespaced(client.clone(), &ns)
-    } else {
-        Api::all(client.clone())
-    };
+    let api: Api<K> = Api::all(client.clone());
 
     let patch = json!({
         "status": status
@@ -164,28 +158,6 @@ impl StatusCondition {
         Self::new(
             "Available",
             if available {
-                ConditionStatus::True
-            } else {
-                ConditionStatus::False
-            },
-        )
-    }
-
-    pub fn progressing(progressing: bool) -> Self {
-        Self::new(
-            "Progressing",
-            if progressing {
-                ConditionStatus::True
-            } else {
-                ConditionStatus::False
-            },
-        )
-    }
-
-    pub fn degraded(degraded: bool) -> Self {
-        Self::new(
-            "Degraded",
-            if degraded {
                 ConditionStatus::True
             } else {
                 ConditionStatus::False

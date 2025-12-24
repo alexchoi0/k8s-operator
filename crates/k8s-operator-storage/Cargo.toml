@@ -15,6 +15,7 @@ rocksdb = ["dep:rocksdb"]
 [dependencies]
 k8s-operator-core = { path = "../k8s-operator-core", version = "0.1.0" }
 openraft = { workspace = true }
+openraft-memstore = { workspace = true }
 rocksdb = { workspace = true, optional = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }

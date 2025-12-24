@@ -1,10 +1,9 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::sync::watch;
 use tracing::{debug, info};
 
-use k8s_operator_core::{NodeRole, ReconcileError, ReconcileResult};
+use k8s_operator_core::{NodeRole, ReconcileError};
 
 pub struct LeaderGuard {
     role_rx: watch::Receiver<NodeRole>,
@@ -48,18 +47,6 @@ impl LeaderGuard {
             Ok(())
         } else {
             Err(ReconcileError::NotLeader)
-        }
-    }
-
-    pub fn ensure<F, R>(&self, f: F) -> ReconcileResult
-    where
-        F: FnOnce() -> R,
-        R: Into<ReconcileResult>,
-    {
-        if self.is_leader() {
-            f().into()
-        } else {
-            ReconcileResult::Err(ReconcileError::NotLeader)
         }
     }
 }

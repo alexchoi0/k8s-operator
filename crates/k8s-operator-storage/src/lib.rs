@@ -1,9 +1,10 @@
-mod memory;
-#[cfg(feature = "rocksdb")]
-mod rocksdb_storage;
-mod traits;
+mod types;
 
-pub use memory::*;
+pub use openraft_memstore::{MemStore as MemoryStorage, TypeConfig as MemStoreTypeConfig};
+pub use types::*;
+
+pub type LogEntry = Request;
+pub type LogResponse = Response;
+
 #[cfg(feature = "rocksdb")]
-pub use rocksdb_storage::*;
-pub use traits::*;
+pub type RocksDbStorage = MemoryStorage;

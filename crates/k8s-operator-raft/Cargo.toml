@@ -12,19 +12,6 @@ categories = ["development-tools"]
 k8s-operator-core = { path = "../k8s-operator-core", version = "0.1.0" }
 k8s-operator-storage = { path = "../k8s-operator-storage", version = "0.1.0" }
 openraft = { workspace = true }
-async-trait = { workspace = true }
-thiserror = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tonic = { workspace = true }
-prost = { workspace = true }
-futures = { workspace = true }
-bytes = { workspace = true }
-parking_lot = { workspace = true }
-async-stream = "0.3"
-tokio-stream = "0.1"
-
-[build-dependencies]
-tonic-build = { workspace = true }

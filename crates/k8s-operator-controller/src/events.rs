@@ -25,13 +25,15 @@ impl EventType {
 pub struct EventRecorder {
     client: Client,
     component: String,
+    namespace: String,
 }
 
 impl EventRecorder {
-    pub fn new(client: Client, component: impl Into<String>) -> Self {
+    pub fn new(client: Client, component: impl Into<String>, namespace: impl Into<String>) -> Self {
         Self {
             client,
             component: component.into(),
+            namespace: namespace.into(),
         }
     }
 
@@ -44,15 +46,10 @@ impl EventRecorder {
     ) -> k8s_operator_core::Result<()>
     where
         K: Resource,
+        K::DynamicType: Default,
     {
         let reason = reason.into();
         let message = message.into();
-
-        let namespace = resource
-            .meta()
-            .namespace
-            .clone()
-            .unwrap_or_else(|| "default".to_string());
 
         let name = resource.meta().name.clone().unwrap_or_default();
         let uid = resource.meta().uid.clone().unwrap_or_default();
@@ -67,14 +64,14 @@ impl EventRecorder {
         let event = Event {
             metadata: ObjectMeta {
                 name: Some(event_name),
-                namespace: Some(namespace.clone()),
+                namespace: Some(self.namespace.clone()),
                 ..Default::default()
             },
             involved_object: k8s_openapi::api::core::v1::ObjectReference {
                 api_version: Some(K::api_version(&K::DynamicType::default()).to_string()),
                 kind: Some(K::kind(&K::DynamicType::default()).to_string()),
                 name: Some(name.clone()),
-                namespace: Some(namespace.clone()),
+                namespace: Some(self.namespace.clone()),
                 uid: Some(uid),
                 ..Default::default()
             },
@@ -89,7 +86,7 @@ impl EventRecorder {
             ..Default::default()
         };
 
-        let events: Api<Event> = Api::namespaced(self.client.clone(), &namespace);
+        let events: Api<Event> = Api::namespaced(self.client.clone(), &self.namespace);
         events
             .create(&PostParams::default(), &event)
             .await
@@ -113,6 +110,7 @@ impl EventRecorder {
     ) -> k8s_operator_core::Result<()>
     where
         K: Resource,
+        K::DynamicType: Default,
     {
         self.record(resource, EventType::Normal, reason, message)
             .await
@@ -126,68 +124,9 @@ impl EventRecorder {
     ) -> k8s_operator_core::Result<()>
     where
         K: Resource,
+        K::DynamicType: Default,
     {
         self.record(resource, EventType::Warning, reason, message)
-            .await
-    }
-}
-
-pub struct EventBuilder<'a, K>
-where
-    K: Resource,
-{
-    recorder: &'a EventRecorder,
-    resource: &'a K,
-    event_type: EventType,
-    reason: Option<String>,
-    message: Option<String>,
-}
-
-impl<'a, K> EventBuilder<'a, K>
-where
-    K: Resource,
-{
-    pub fn new(recorder: &'a EventRecorder, resource: &'a K) -> Self {
-        Self {
-            recorder,
-            resource,
-            event_type: EventType::Normal,
-            reason: None,
-            message: None,
-        }
-    }
-
-    pub fn event_type(mut self, event_type: EventType) -> Self {
-        self.event_type = event_type;
-        self
-    }
-
-    pub fn normal(mut self) -> Self {
-        self.event_type = EventType::Normal;
-        self
-    }
-
-    pub fn warning(mut self) -> Self {
-        self.event_type = EventType::Warning;
-        self
-    }
-
-    pub fn reason(mut self, reason: impl Into<String>) -> Self {
-        self.reason = Some(reason.into());
-        self
-    }
-
-    pub fn message(mut self, message: impl Into<String>) -> Self {
-        self.message = Some(message.into());
-        self
-    }
-
-    pub async fn emit(self) -> k8s_operator_core::Result<()> {
-        let reason = self.reason.unwrap_or_else(|| "Unknown".to_string());
-        let message = self.message.unwrap_or_default();
-
-        self.recorder
-            .record(self.resource, self.event_type, reason, message)
             .await
     }
 }

@@ -3,7 +3,7 @@ use kube::{Api, Client};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::json;
-use tracing::{debug, info};
+use tracing::info;
 
 use k8s_operator_core::OperatorError;
 
@@ -18,13 +18,7 @@ where
         OperatorError::Internal("Resource has no name".to_string())
     })?;
 
-    let namespace = resource.meta().namespace.clone();
-
-    let api: Api<K> = if let Some(ns) = namespace {
-        Api::namespaced(client.clone(), &ns)
-    } else {
-        Api::all(client.clone())
-    };
+    let api: Api<K> = Api::all(client.clone());
 
     let patch = json!({
         "metadata": {
@@ -49,13 +43,7 @@ where
         OperatorError::Internal("Resource has no name".to_string())
     })?;
 
-    let namespace = resource.meta().namespace.clone();
-
-    let api: Api<K> = if let Some(ns) = namespace {
-        Api::namespaced(client.clone(), &ns)
-    } else {
-        Api::all(client.clone())
-    };
+    let api: Api<K> = Api::all(client.clone());
 
     let current_finalizers: Vec<String> = resource
         .meta()
