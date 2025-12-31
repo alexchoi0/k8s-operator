@@ -1,0 +1,546 @@
+# User Manual
+
+This guide covers everything you need to build and deploy Kubernetes operators with k8s-operator.
+
+## Table of Contents
+
+- [Getting Started](#getting-started)
+- [The Operator Builder](#the-operator-builder)
+- [The Context API](#the-context-api)
+- [Resource Builders](#resource-builders)
+- [High Availability Setup](#high-availability-setup)
+- [TLS Configuration](#tls-configuration)
+- [Kubernetes Deployment](#kubernetes-deployment)
+
+## Getting Started
+
+### Installation
+
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+k8s-operator = "0.3"
+tokio = { version = "1", features = ["full"] }
+```
+
+For high availability with leader election:
+
+```toml
+[dependencies]
+k8s-operator = { version = "0.3", features = ["ha"] }
+```
+
+For HA with persistent storage (recommended for production):
+
+```toml
+[dependencies]
+k8s-operator = { version = "0.3", features = ["ha-persist"] }
+```
+
+### Your First Operator
+
+```rust
+use k8s_operator::prelude::*;
+
+#[derive(CustomResource, Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[kube(group = "example.com", version = "v1", kind = "WebApp", namespaced)]
+pub struct WebAppSpec {
+    pub image: String,
+    pub replicas: u32,
+}
+
+async fn reconcile(ctx: Context<WebApp>) -> Result<Action> {
+    let app = ctx.resource();
+
+    ctx.apply(
+        Deployment::new(ctx.name())
+            .replicas(app.spec.replicas)
+            .container(
+                Container::new("app")
+                    .image(&app.spec.image)
+                    .port(80)
+            )
+    ).await?;
+
+    ctx.apply(
+        Service::new(ctx.name())
+            .port(80, 80)
+            .selector(Selector::new().insert("app", ctx.name()))
+    ).await?;
+
+    Ok(Action::requeue(Duration::from_secs(300)))
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    Operator::<WebApp>::new()
+        .reconcile(reconcile)
+        .with_finalizer()
+        .run()
+        .await
+}
+```
+
+## The Operator Builder
+
+The `Operator` builder configures and runs your controller:
+
+```rust
+Operator::<MyResource>::new()
+    .reconcile(reconcile_fn)       // Required: reconciliation function
+    .on_delete(cleanup_fn)         // Optional: cleanup on deletion
+    .with_finalizer()              // Optional: auto-manage finalizer
+    .requeue_after(Duration::from_secs(300))  // Default requeue interval
+    .error_requeue(Duration::from_secs(60))   // Requeue on error
+    .run()
+    .await
+```
+
+### Reconciliation Function
+
+Your reconcile function receives a `Context` and returns an `Action`:
+
+```rust
+async fn reconcile(ctx: Context<MyResource>) -> Result<Action> {
+    // Your logic here
+    Ok(Action::requeue(Duration::from_secs(300)))
+}
+```
+
+### Cleanup Function
+
+Optional function called when a resource is deleted:
+
+```rust
+async fn cleanup(ctx: Context<MyResource>) -> Result<()> {
+    // Cleanup external resources, notify services, etc.
+    Ok(())
+}
+```
+
+## The Context API
+
+The `Context<R>` provides everything you need to interact with Kubernetes:
+
+```rust
+async fn reconcile(ctx: Context<MyResource>) -> Result<Action> {
+    // Access the resource being reconciled
+    let resource = ctx.resource();
+    let name = ctx.name();
+    let namespace = ctx.namespace();
+
+    // Apply child resources (creates or updates)
+    ctx.apply(Deployment::new("my-deploy")).await?;
+
+    // Delete child resources
+    ctx.delete::<Deployment>("old-deploy").await?;
+
+    // Get existing resources
+    let deploy: Option<Deployment> = ctx.get("my-deploy").await?;
+
+    // Set status on the parent resource
+    ctx.set_status(MyStatus { ready: true }).await?;
+
+    // Emit events
+    ctx.event("Reconciled", "Successfully reconciled resource").await?;
+    ctx.warning("Issue", "Something needs attention").await?;
+
+    Ok(Action::requeue(Duration::from_secs(300)))
+}
+```
+
+## Resource Builders
+
+Create Kubernetes resources with chainable, typed builders.
+
+### Deployment
+
+```rust
+Deployment::new("my-app")
+    .replicas(3)
+    .labels(Labels::new().insert("app", "my-app"))
+    .container(
+        Container::new("main")
+            .image("nginx:1.25")
+            .port(80)
+            .env("LOG_LEVEL", "info")
+            .env_from_secret("DB_PASSWORD", "my-secret", "password")
+            .env_from_configmap("CONFIG", "my-config", "key")
+            .resources(Resources::new()
+                .cpu_request("100m")
+                .cpu_limit("500m")
+                .memory_request("128Mi")
+                .memory_limit("512Mi"))
+            .liveness_probe(Probe::http("/health", 8080).period(10))
+            .readiness_probe(Probe::http("/ready", 8080).initial_delay(5))
+            .volume_mount("data", "/data")
+            .security_context(SecurityContext::new()
+                .read_only_root_filesystem(true)
+                .run_as_non_root(true))
+    )
+    .volume(Volume::pvc("data", "my-pvc"))
+    .service_account("my-sa")
+```
+
+### Service
+
+```rust
+Service::new("my-service")
+    .port(80, 8080)                    // port, targetPort
+    .named_port("metrics", 9090, 9090)
+    .selector(Selector::new().insert("app", "my-app"))
+    .cluster_ip()                      // default
+    .node_port(80, 8080, 30080)        // with nodePort
+    .load_balancer()                   // type: LoadBalancer
+    .headless()                        // clusterIP: None
+```
+
+### ConfigMap & Secret
+
+```rust
+ConfigMap::new("my-config")
+    .data("config.yaml", "key: value")
+    .data("settings.json", "{}")
+
+Secret::new("my-secret")
+    .data("password", "secret123")     // auto base64 encoded
+    .data("api-key", "abc123")
+```
+
+### Ingress
+
+```rust
+Ingress::new("my-ingress")
+    .ingress_class("nginx")
+    .annotation("nginx.ingress.kubernetes.io/rewrite-target", "/")
+    .rule(
+        IngressRule::new()
+            .host("example.com")
+            .path("/api", "api-service", 80)
+            .path("/", "web-service", 80)
+    )
+    .tls(vec!["example.com"], "tls-secret")
+```
+
+### StatefulSet
+
+```rust
+StatefulSet::new("my-stateful")
+    .replicas(3)
+    .service_name("my-headless")
+    .container(Container::new("app").image("redis:7"))
+    .volume_claim_template(
+        PersistentVolumeClaim::new("data")
+            .storage("10Gi")
+            .access_mode("ReadWriteOnce")
+    )
+```
+
+### RBAC
+
+```rust
+ServiceAccount::new("my-sa")
+
+Role::new("my-role")
+    .rule(PolicyRule::new()
+        .api_groups(vec![""])
+        .resources(vec!["pods", "services"])
+        .verbs(vec!["get", "list", "watch"]))
+
+RoleBinding::new("my-binding")
+    .role("my-role")
+    .service_account("my-sa", "default")
+
+ClusterRole::new("my-cluster-role")
+    .rule(PolicyRule::new()
+        .api_groups(vec!["example.com"])
+        .resources(vec!["myresources"])
+        .verbs(vec!["*"]))
+
+ClusterRoleBinding::new("my-cluster-binding")
+    .cluster_role("my-cluster-role")
+    .service_account("my-sa", "default")
+```
+
+### Jobs and CronJobs
+
+```rust
+Job::new("my-job")
+    .backoff_limit(3)
+    .container(Container::new("job").image("busybox").command(vec!["echo", "hello"]))
+
+CronJob::new("my-cronjob")
+    .schedule("0 * * * *")
+    .container(Container::new("cron").image("busybox"))
+```
+
+### DaemonSet
+
+```rust
+DaemonSet::new("my-daemon")
+    .container(Container::new("agent").image("datadog/agent"))
+```
+
+### NetworkPolicy
+
+```rust
+NetworkPolicy::new("my-policy")
+    .pod_selector(Selector::new().insert("app", "my-app"))
+    .allow_ingress(
+        NetworkPolicyIngress::new()
+            .from_namespace_selector(Selector::new().insert("env", "prod"))
+            .tcp_port(80)
+    )
+    .deny_all_egress()
+```
+
+## High Availability Setup
+
+### Enabling HA
+
+```rust
+use k8s_operator::prelude::*;
+use k8s_operator::{RaftConfig, RaftNodeManager};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Parse node ID from StatefulSet pod name (e.g., "my-operator-0" -> 0)
+    let node_id = RaftNodeManager::node_id_from_hostname()?;
+
+    Operator::<MyResource>::new()
+        .reconcile(reconcile)
+        .with_leader_election(
+            RaftConfig::new("my-cluster")
+                .node_id(node_id)
+                .service_name("my-operator-headless")
+                .namespace("default")
+        )
+        .run()
+        .await
+}
+```
+
+### Persistent Storage (RocksDB)
+
+For production, use the `ha-persist` feature to survive pod restarts:
+
+```rust
+use k8s_operator::{RaftConfig, RaftNodeManager};
+
+let node_manager = RaftNodeManager::new_with_rocksdb(
+    RaftConfig::new("my-cluster")
+        .node_id(node_id)
+        .service_name("my-operator-headless")
+        .namespace("default"),
+    "/data/raft"  // Data directory for RocksDB
+).await?;
+```
+
+## TLS Configuration
+
+### TLS Modes
+
+| Mode | Description |
+|------|-------------|
+| `TlsConfig::disabled()` | Plaintext gRPC (default) |
+| `TlsConfig::tls(ca)` | TLS with server verification |
+| `TlsConfig::mtls(ca, cert, key)` | Mutual TLS with client certificates |
+
+### Configuring TLS
+
+```rust
+use k8s_operator::{RaftConfig, TlsConfig, RaftNodeManager};
+
+// TLS (server authentication only)
+let tls = TlsConfig::tls("/certs/ca.crt");
+
+// mTLS (mutual authentication)
+let tls = TlsConfig::mtls(
+    "/certs/ca.crt",      // CA certificate
+    "/certs/tls.crt",     // Node certificate
+    "/certs/tls.key",     // Node private key
+);
+
+let node_manager = RaftNodeManager::new(
+    RaftConfig::new("my-cluster")
+        .node_id(node_id)
+        .service_name("my-operator-headless")
+        .namespace("default")
+        .tls(tls)
+).await?;
+```
+
+### Creating Certificates (Development)
+
+```bash
+# Generate CA
+openssl genrsa -out ca.key 4096
+openssl req -x509 -new -nodes -key ca.key -sha256 -days 365 -out ca.crt -subj "/CN=raft-ca"
+
+# Generate node certificate
+openssl genrsa -out tls.key 4096
+openssl req -new -key tls.key -out tls.csr -subj "/CN=raft-node"
+openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out tls.crt -days 365 -sha256
+
+# Create Kubernetes secret
+kubectl create secret generic raft-tls \
+  --from-file=ca.crt=ca.crt \
+  --from-file=tls.crt=tls.crt \
+  --from-file=tls.key=tls.key
+```
+
+## Kubernetes Deployment
+
+### Headless Service
+
+Required for pod-to-pod DNS discovery:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-operator-headless
+spec:
+  clusterIP: None
+  selector:
+    app: my-operator
+  ports:
+    - port: 8080
+      name: raft
+```
+
+### StatefulSet
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: my-operator
+spec:
+  serviceName: my-operator-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-operator
+  template:
+    metadata:
+      labels:
+        app: my-operator
+    spec:
+      containers:
+        - name: operator
+          image: my-operator:latest
+          ports:
+            - containerPort: 8080
+              name: raft
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+```
+
+### With Persistent Storage
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: my-operator
+spec:
+  serviceName: my-operator-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-operator
+  template:
+    metadata:
+      labels:
+        app: my-operator
+    spec:
+      containers:
+        - name: operator
+          image: my-operator:latest
+          ports:
+            - containerPort: 8080
+              name: raft
+          volumeMounts:
+            - name: raft-data
+              mountPath: /data/raft
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: HOSTNAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+  volumeClaimTemplates:
+    - metadata:
+        name: raft-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+```
+
+### With TLS Certificates
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: my-operator
+spec:
+  serviceName: my-operator-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-operator
+  template:
+    metadata:
+      labels:
+        app: my-operator
+    spec:
+      containers:
+        - name: operator
+          image: my-operator:latest
+          ports:
+            - containerPort: 8080
+              name: raft
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /certs
+              readOnly: true
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: raft-tls
+```
+
+## Available Types
+
+| Category | Types |
+|----------|-------|
+| **Workloads** | `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob`, `Pod` |
+| **Config** | `ConfigMap`, `Secret` |
+| **Networking** | `Service`, `Ingress`, `NetworkPolicy` |
+| **Storage** | `PersistentVolumeClaim`, `Volume` |
+| **RBAC** | `ServiceAccount`, `Role`, `RoleBinding`, `ClusterRole`, `ClusterRoleBinding` |
+| **Helpers** | `Container`, `Labels`, `Annotations`, `Selector`, `Probe`, `Resources`, `SecurityContext` |
