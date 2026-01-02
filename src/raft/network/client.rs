@@ -45,9 +45,17 @@ impl GrpcRaftClient {
         }
     }
 
+    pub fn invalidate_connection(&mut self) {
+        self.client = None;
+    }
+
     async fn get_client(&mut self) -> Result<&mut RaftServiceClient<Channel>, ConnectionError> {
         if self.client.is_none() {
-            let scheme = if self.tls.is_enabled() { "https" } else { "http" };
+            let scheme = if self.tls.is_enabled() {
+                "https"
+            } else {
+                "http"
+            };
             let endpoint = format!("{}://{}", scheme, self.addr);
             let mut channel_builder = Channel::from_shared(endpoint)
                 .map_err(|e| ConnectionError(e.to_string()))?
@@ -82,9 +90,15 @@ impl GrpcRaftClient {
         }
 
         if self.tls.is_mtls() {
-            let cert_path = self.tls.cert.as_ref()
+            let cert_path = self
+                .tls
+                .cert
+                .as_ref()
                 .ok_or_else(|| ConnectionError("mTLS requires cert path".into()))?;
-            let key_path = self.tls.key.as_ref()
+            let key_path = self
+                .tls
+                .key
+                .as_ref()
                 .ok_or_else(|| ConnectionError("mTLS requires key path".into()))?;
 
             let cert = tokio::fs::read(cert_path)
@@ -147,8 +161,11 @@ fn entry_to_proto(entry: &Entry<TypeConfig>) -> pb::Entry {
                     let nodes: HashMap<u64, pb::RaftNode> = cfg
                         .iter()
                         .map(|id| {
-                            let node = mem.get_node(id)
-                                .map(|n| pb::RaftNode { addr: n.addr.clone() })
+                            let node = mem
+                                .get_node(id)
+                                .map(|n| pb::RaftNode {
+                                    addr: n.addr.clone(),
+                                })
                                 .unwrap_or_default();
                             (*id, node)
                         })
@@ -157,9 +174,9 @@ fn entry_to_proto(entry: &Entry<TypeConfig>) -> pb::Entry {
                 })
                 .collect();
             pb::EntryPayload {
-                payload: Some(pb::entry_payload::Payload::Membership(pb::MembershipPayload {
-                    configs,
-                })),
+                payload: Some(pb::entry_payload::Payload::Membership(
+                    pb::MembershipPayload { configs },
+                )),
             }
         }
     };
